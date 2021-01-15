@@ -30,7 +30,7 @@ GAUSSIAN_SIGMA = 5 #5 #5 for checker board
 
 WINDOW_SIZE = 3 #8 # 10 in general   or   #3 for checker board
 HARRIS_DETECTOR_ALPHA = 0.04 # should be in a range of [0.04; 0.06]
-HARRIS_DETECTOR_THRESHOLD = 2000
+HARRIS_DETECTOR_THRESHOLD = 500
 
 LAPLACIAN_5POINT_STENCIL = [[0.0, 1.0, 0.0], [1.0, -4.0, 1.0], [0.0, 1.0, 0.0]]
 LAPLACIAN_9POINT_STENCIL = [[0.25, 0.5, 0.25], [0.5, -3.0, 0.5], [0.25, 0.5, 0.25]]
@@ -281,7 +281,7 @@ def harris_corner_detector(image, window_size, alpha, threshold, output_path):
     except IOError:
         print('Cannot save image as a file ', output_path)
         exit
-
+    return outer_corners
 
 def get_outer_corners(corners):
     x_min, y_min = corners[0][0], corners[0][1]
@@ -296,15 +296,15 @@ def get_outer_corners(corners):
             x_max = corner[0]
         if corner[1] > y_max:
             y_max = corner[1]
-    return [(x_min, y_min), (x_max, y_max)]
+    return [x_min, y_min, x_max, y_max]
 
 
 def mark_blob(image, outer_corners):
     image_rgb_data = convert_grayscale_to_rgb(image)
-    x_min = outer_corners[0][0]
-    y_min = outer_corners[0][1]
-    x_max = outer_corners[1][0]
-    y_max = outer_corners[1][1]
+    x_min = outer_corners[0]
+    y_min = outer_corners[1]
+    x_max = outer_corners[2]
+    y_max = outer_corners[3]
     for x in range(x_min, x_max + 1):
         image_rgb_data[x][y_min] = [255, 0, 0]
         image_rgb_data[x][y_max] = [255, 0, 0]
@@ -314,49 +314,21 @@ def mark_blob(image, outer_corners):
     return image_rgb_data
 
 
-def main():
+def detect_blobs(folder_path):
+    result = []
     for filename in os.listdir(IMAGE_DIR):
         if filename != '.directory':
             filepath = IMAGE_DIR + filename
             image = corr.read_grayscale_image_as_array(filepath)
             output_filename = OUTPUT_DIR + 'corners_' + filename
-            harris_corner_detector(image, WINDOW_SIZE, HARRIS_DETECTOR_ALPHA, HARRIS_DETECTOR_THRESHOLD, output_filename)
+            coordinates = harris_corner_detector(image, WINDOW_SIZE, HARRIS_DETECTOR_ALPHA, HARRIS_DETECTOR_THRESHOLD, output_filename)
+            result.append({'file': filename, 'coords': coordinates})
+    return result
+
+
+def main():
+    print(detect_blobs(IMAGE_DIR))
     print('Done')
-    # blurred_image = blur_image(image, GAUSSIAN_KERNEL_HEIGHT, GAUSSIAN_KERNEL_WIDTH, GAUSSIAN_SIGMA)
-    # corr.save_array_as_grayscale_image(blurred_image, OUTPUT_PATH)
-    #
-    # image_dx_plus_dy = get_laplacian_dx_plus_dy(blurred_image)
-    # corr.save_array_as_grayscale_image(image_dx_plus_dy, DX_PLUS_DY_DERIVATIVE_PATH)
-    #
-    # image_laplacian_dx = get_laplacian_dx(blurred_image)
-    # corr.save_array_as_grayscale_image(image_laplacian_dx, LAPLACIAN_DX_DERIVATIVE_PATH)
-    #
-    # image_sobel_dx = get_sobel_dx(blurred_image)
-    # corr.save_array_as_grayscale_image(image_sobel_dx, SOBEL_DX_DERIVATIVE_PATH)
-    #
-    # image_sobel_dy = get_sobel_dy(blurred_image)
-    # corr.save_array_as_grayscale_image(image_sobel_dy, SOBEL_DY_DERIVATIVE_PATH)
-    #
-    # image_laplacian_dy = get_laplacian_dy(blurred_image)
-    # corr.save_array_as_grayscale_image(image_laplacian_dy, LAPLACIAN_DY_DERIVATIVE_PATH)
-    #
-    # multiplied_dx_dy = np.multiply(image_laplacian_dx, image_laplacian_dy)
-    # corr.save_array_as_grayscale_image(multiplied_dx_dy, DXxDY_DERIVATIVE_PATH)
-    #
-    # multiplied_dx_dx = np.multiply(image_laplacian_dx, image_laplacian_dx)
-    # corr.save_array_as_grayscale_image(multiplied_dx_dx, DXxDX_DERIVATIVE_PATH)
-    #
-    # multiplied_dy_dy = np.multiply(image_laplacian_dy, image_laplacian_dy)
-    # corr.save_array_as_grayscale_image(multiplied_dy_dy, DYxDY_DERIVATIVE_PATH)
-    #
-    # added_dx_dy = np.add(image_laplacian_dx, image_laplacian_dy)
-    # corr.save_array_as_grayscale_image(added_dx_dy, ADDED_DX_DY_DERIVATIVE_PATH)
-    #
-    # image_d2x2_derivative = get_laplacian_dx(image_laplacian_dx)
-    # corr.save_array_as_grayscale_image(image_d2x2_derivative, D2X2_DERIVATIVE_PATH)
-    #
-    # image_d2y2_derivative = get_laplacian_dy(image_laplacian_dy)
-    # corr.save_array_as_grayscale_image(image_d2y2_derivative, D2Y2_DERIVATIVE_PATH)
 
 
 if __name__ == "__main__":
