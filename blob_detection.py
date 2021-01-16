@@ -94,13 +94,6 @@ def get_harris_cornerness(image_data, window_size: int = WINDOW_SIZE, alpha: flo
     image_columns_number = image_data.shape[1]
     window_size_offset = window_size // 2
     window_size_max_index = window_size // 2 + window_size % 2
-
-    median_filter_size = 25
-    median_offset = median_filter_size // 2
-    padded_image = corr.image_padding(image_data, median_offset, median_offset)
-    median_kernel = get_median_filter(median_filter_size)
-    image_data = corr.get_convolution(padded_image, median_kernel)
-
     if enable_blur:
         blurred_image = blur_image(image_data, GAUSSIAN_KERNEL_HEIGHT, GAUSSIAN_KERNEL_WIDTH, GAUSSIAN_SIGMA)
     else:
