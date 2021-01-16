@@ -2,42 +2,37 @@ import os
 import math
 import numpy as np
 import correlation as corr
-from PIL import Image, ImageDraw
+from PIL import Image
+from enum import Enum
 
-IMAGE_DIR = 'files/Blobs/'
+INPUT_DIR = 'files/Blobs/'
 OUTPUT_DIR = 'files/Blobs/'
-IMAGE_PATH = 'files/Blobs/SR11.png'
-# IMAGE_PATH = 'files/kernel_old.png'
-MARKED_CORNERS_OUTPUT_PATH = 'files/marked_corners_SR11_1.png'
-KERNEL_PATH = 'files/kernel.png'
-GAUSSIAN_KERNEL_PATH = 'files/Blobs/gaussian_kernel.png'
-OUTPUT_PATH = 'files/Blobs/blur_result.png'
-LAPLACIAN_DX_DERIVATIVE_PATH = 'files/Blobs/laplacian_dx_derivative.png'
-LAPLACIAN_DY_DERIVATIVE_PATH = 'files/Blobs/laplacian_dy_derivative.png'
-SOBEL_DX_DERIVATIVE_PATH = 'files/Blobs/sobel_dx_derivative.png'
-SOBEL_DY_DERIVATIVE_PATH = 'files/Blobs/sobel_dy_derivative.png'
-DX_PLUS_DY_DERIVATIVE_PATH = 'files/Blobs/dx_plus_dy.png'
-ADDED_DX_DY_DERIVATIVE_PATH = 'files/Blobs/added_dx_dy.png'
-DXxDY_DERIVATIVE_PATH = 'files/Blobs/dx_x_dy.png'
-D2X2_DERIVATIVE_PATH = 'files/Blobs/d2x2_derivative.png'
-D2Y2_DERIVATIVE_PATH = 'files/Blobs/d2y2_derivative.png'
-DXxDX_DERIVATIVE_PATH = 'files/Blobs/dx_x_dx.png'
-DYxDY_DERIVATIVE_PATH = 'files/Blobs/dy_x_dy.png'
 
-GAUSSIAN_KERNEL_HEIGHT = 20 #20 #21 for checker board
-GAUSSIAN_KERNEL_WIDTH = 20 #20 #21 for checker board
-GAUSSIAN_SIGMA = 5 #5 #5 for checker board
+# Parameters for blurring with Gaussian filter
+# Default GAUSSIAN_KERNEL_HEIGHT and GAUSSIAN_KERNEL_WIDTH are 23
+# Default GAUSSIAN_SIGMA is 7
+GAUSSIAN_KERNEL_HEIGHT = 23
+GAUSSIAN_KERNEL_WIDTH = 23
+GAUSSIAN_SIGMA = 7
 
-WINDOW_SIZE = 3 #8 # 10 in general   or   #3 for checker board
-HARRIS_DETECTOR_ALPHA = 0.04 # should be in a range of [0.04; 0.06]
-HARRIS_DETECTOR_THRESHOLD = 500
+# A window size for calculating covariance matrix. Default value is 3
+WINDOW_SIZE = 3
 
-LAPLACIAN_5POINT_STENCIL = [[0.0, 1.0, 0.0], [1.0, -4.0, 1.0], [0.0, 1.0, 0.0]]
-LAPLACIAN_9POINT_STENCIL = [[0.25, 0.5, 0.25], [0.5, -3.0, 0.5], [0.25, 0.5, 0.25]]
-LAPLACIAN_X = [[0.0, 0.0, 0.0], [1.0, -2.0, 1.0], [0.0, 0.0, 0.0]]
-LAPLACIAN_Y = np.transpose(LAPLACIAN_X)
-SOBEL_X = [[1.0, 0.0, -1.0], [2.0, 0.0, -2.0], [1.0, 0.0, -1.0]]
-SOBEL_Y = np.transpose(SOBEL_X)
+# HARRIS_DETECTOR_ALPHA should be in a range of [0.04; 0.06]
+HARRIS_DETECTOR_ALPHA = 0.04
+HARRIS_DETECTOR_THRESHOLD = 2 * math.pow(255, 3)
+
+
+class DerivativeOperator(list, Enum):
+    LAPLACIAN = [[0.0, 0.0, 0.0], [1.0, -2.0, 1.0], [0.0, 0.0, 0.0]]
+    SOBEL = [[1.0, 0.0, -1.0], [2.0, 0.0, -2.0], [1.0, 0.0, -1.0]]
+
+
+def get_median_filter(size: int) -> list:
+    if size <= 0 or size % 2 == 0:
+        raise ValueError('Size of a median filter should positive odd number.')
+    median_filter = np.ones((size, size), 'uint8') / (size ** 2)
+    return median_filter
 
 
 def gaussian_distribution(x: float, y: float, sigma: float) -> float:
@@ -48,111 +43,76 @@ def gaussian_distribution(x: float, y: float, sigma: float) -> float:
     return gaussian
 
 
-def get_gaussian_grayscale_kernel(kernel_rows_number: int, kernel_columns_number: int, sigma: float):
+def get_gaussian_grayscale_kernel(kernel_rows_number: int, kernel_columns_number: int, sigma: float) -> np.ndarray:
     if kernel_rows_number <= 0 or kernel_columns_number <= 0:
         raise ValueError('kernel_rows_number and kernel_columns_number parameters should be positive integers.')
     kernel_row_offset = kernel_rows_number // 2
     kernel_column_offset = kernel_columns_number // 2
-    kernel_row_range_max = kernel_row_offset + kernel_rows_number % 2  # - 1
-    kernel_column_range_max = kernel_column_offset + kernel_columns_number % 2  # - 1
+    kernel_row_range_max = kernel_row_offset + kernel_rows_number % 2
+    kernel_column_range_max = kernel_column_offset + kernel_columns_number % 2
     gaussian_kernel = [[0.0 for y in range(kernel_columns_number)] for x in range(kernel_rows_number)]
-
     for row in range(-kernel_row_offset, kernel_row_range_max):
         for column in range(-kernel_column_offset, kernel_column_range_max):
             gaussian_kernel[row + kernel_row_offset][column + kernel_column_offset] = gaussian_distribution(row, column, sigma)
-
     return np.asarray(gaussian_kernel)
 
 
-def save_gaussian_kernel_as_image(kernel, output_path):
-    kernel = np.asarray(kernel)
-    kernel_rows_number = kernel.shape[0]
-    kernel_columns_number = kernel.shape[1]
+def save_gaussian_kernel_as_image(kernel_data, output_path: str):
+    kernel_data = np.asarray(kernel_data)
+    kernel_rows_number = kernel_data.shape[0]
+    kernel_columns_number = kernel_data.shape[1]
     kernel_center_row_index = kernel_rows_number // 2
     kernel_center_column_index = kernel_columns_number // 2
-    grayscale_gaussian_kernel = (kernel / kernel[kernel_center_row_index][kernel_center_column_index]) * (corr.GRAYSCALE_COLORS_NUMBER - 1)
-    # corr.save_array_as_grayscale_image(grayscale_gaussian_kernel, output_path)
+    grayscale_gaussian_kernel = (kernel_data / kernel_data[kernel_center_row_index][kernel_center_column_index]) * (corr.GRAYSCALE_COLORS_NUMBER - 1)
+    corr.save_array_as_grayscale_image(grayscale_gaussian_kernel, output_path)
 
 
-def blur_image(image, kernel_rows_number: int, kernel_columns_number: int, sigma: float):
+def blur_image(image_data, kernel_rows_number: int, kernel_columns_number: int, sigma: float, output_dir: str = None) -> np.ndarray:
     kernel_row_offset = kernel_rows_number // 2
     kernel_column_offset = kernel_columns_number // 2
-    padded_image = corr.image_padding(image, kernel_row_offset, kernel_column_offset)
+    padded_image = corr.image_padding(image_data, kernel_row_offset, kernel_column_offset)
     gaussian_kernel = get_gaussian_grayscale_kernel(kernel_rows_number, kernel_columns_number, sigma)
-    # save_gaussian_kernel_as_image(gaussian_kernel, GAUSSIAN_KERNEL_PATH)
-    return corr.get_convolution(padded_image, gaussian_kernel)
+    blurred_image = corr.get_convolution(padded_image, gaussian_kernel)
+    if not (output_dir is None):
+        corr.save_array_as_grayscale_image(blurred_image, output_dir + 'blur.png')
+        save_gaussian_kernel_as_image(gaussian_kernel, output_dir + 'kernel.png')
+    return blurred_image
 
 
-def get_laplacian_dx_plus_dy(image):
-    kernel_offset = len(LAPLACIAN_5POINT_STENCIL) // 2
-    padded_image = corr.image_padding(image, kernel_offset, kernel_offset)
-    image_derivative = corr.get_convolution(padded_image, LAPLACIAN_5POINT_STENCIL)
+def get_derivative(image_data, operator, output_path: str = None) -> np.ndarray:
+    kernel_offset = len(operator) // 2
+    padded_image = corr.image_padding(image_data, kernel_offset, kernel_offset)
+    image_derivative = corr.get_convolution(padded_image, operator)
+    if not (output_path is None):
+        corr.save_array_as_grayscale_image(image_derivative, output_path + 'derivative.png')
     return image_derivative
 
 
-def get_laplacian_dx(image):
-    kernel_offset = len(LAPLACIAN_X) // 2
-    padded_image = corr.image_padding(image, kernel_offset, kernel_offset)
-    image_derivative = corr.get_convolution(padded_image, LAPLACIAN_X)
-    return image_derivative
-
-
-def get_laplacian_dy(image):
-    kernel_offset = len(LAPLACIAN_Y) // 2
-    padded_image = corr.image_padding(image, kernel_offset, kernel_offset)
-    image_derivative = corr.get_convolution(padded_image, LAPLACIAN_Y)
-    return image_derivative
-
-
-def get_sobel_dx(image):
-    kernel_offset = len(SOBEL_X) // 2
-    padded_image = corr.image_padding(image, kernel_offset, kernel_offset)
-    image_derivative = corr.get_convolution(padded_image, SOBEL_X)
-    return image_derivative
-
-
-def get_sobel_dy(image):
-    kernel_offset = len(SOBEL_Y) // 2
-    padded_image = corr.image_padding(image, kernel_offset, kernel_offset)
-    image_derivative = corr.get_convolution(padded_image, SOBEL_Y)
-    return image_derivative
-
-
-def get_harris_cornerness(image, window_size=WINDOW_SIZE, alpha=HARRIS_DETECTOR_ALPHA):
-    image_rows_number = image.shape[0]
-    image_columns_number = image.shape[1]
+def get_harris_cornerness(image_data, window_size: int = WINDOW_SIZE, alpha: float = HARRIS_DETECTOR_ALPHA,
+                          dx_operator: DerivativeOperator = DerivativeOperator.LAPLACIAN, enable_blur: bool = True) -> list:
+    image_rows_number = image_data.shape[0]
+    image_columns_number = image_data.shape[1]
     window_size_offset = window_size // 2
     window_size_max_index = window_size // 2 + window_size % 2
 
-    # padded_image = corr.image_padding(image, image_row_offset=GAUSSIAN_KERNEL_HEIGHT, image_column_offset=GAUSSIAN_KERNEL_WIDTH)
-    # blurred_image = blur_image(padded_image, GAUSSIAN_KERNEL_HEIGHT, GAUSSIAN_KERNEL_WIDTH, GAUSSIAN_SIGMA)
+    median_filter_size = 25
+    median_offset = median_filter_size // 2
+    padded_image = corr.image_padding(image_data, median_offset, median_offset)
+    median_kernel = get_median_filter(median_filter_size)
+    image_data = corr.get_convolution(padded_image, median_kernel)
 
-
-    # blurred_image = blur_image(image, GAUSSIAN_KERNEL_HEIGHT, GAUSSIAN_KERNEL_WIDTH, GAUSSIAN_SIGMA)
-    blurred_image = image # skip blurring
-
-    # corr.save_array_as_grayscale_image(blurred_image, OUTPUT_PATH)
-
-    # image_dx = get_sobel_dx(blurred_image)
-    image_dx = get_laplacian_dx(blurred_image)
-    # corr.save_array_as_grayscale_image(image_dx, SOBEL_DX_DERIVATIVE_PATH)
-
-    # image_dy = get_sobel_dy(blurred_image)
-    image_dy = get_laplacian_dy(blurred_image)
-    # corr.save_array_as_grayscale_image(image_dy, SOBEL_DY_DERIVATIVE_PATH)
-
+    if enable_blur:
+        blurred_image = blur_image(image_data, GAUSSIAN_KERNEL_HEIGHT, GAUSSIAN_KERNEL_WIDTH, GAUSSIAN_SIGMA)
+    else:
+        blurred_image = image_data
+    dy_operator = np.transpose(dx_operator)
+    image_dx = get_derivative(blurred_image, dx_operator)
+    image_dy = get_derivative(blurred_image, dy_operator)
     dx_squared = np.multiply(image_dx, image_dx)
     dy_squared = np.multiply(image_dy, image_dy)
     dx_times_dy = np.multiply(image_dx, image_dy)
 
-    # padded_dx_squared = corr.image_padding(dx_squared, window_size, window_size)
-    # padded_dy_squared = corr.image_padding(dy_squared, window_size, window_size)
-    # padded_dx_times_dy = corr.image_padding(dx_times_dy, window_size, window_size)
-
     cornerness = [[0.0 for y in range(image_columns_number)] for x in range(image_rows_number)]
-
-    # TODO: Try to convolve image with gaussian 9x9 kernel instead of calculating sum in a window. Resut will be rotation invariant
-
     for row in range(image_rows_number):
         for column in range(image_columns_number):
             dx_squared_sum = 0.0
@@ -164,17 +124,15 @@ def get_harris_cornerness(image, window_size=WINDOW_SIZE, alpha=HARRIS_DETECTOR_
                         dx_squared_sum += dx_squared[row + window_row][column + window_column]
                         dy_squared_sum += dy_squared[row + window_row][column + window_column]
                         dx_times_dy_sum += dx_times_dy[row + window_row][column + window_column]
-                    # dx_squared_sum += padded_dx_squared[row + window_row][column + window_column]
-                    # dy_squared_sum += padded_dy_squared[row + window_row][column + window_column]
-                    # dx_times_dy_sum += padded_dx_times_dy[row + window_row][column + window_column]
             det = dx_squared_sum * dy_squared_sum - (dx_times_dy_sum ** 2)
             trace = dx_squared_sum + dy_squared_sum
             cornerness[row][column] = det - alpha * (trace ** 2)
+    return cornerness
 
-    return cornerness #
 
-
-def non_maximum_suppression(cornerness, threshold, window_radius):
+def non_maximum_suppression(cornerness: list, threshold: float, window_radius: int) -> list:
+    # Non-maximum supression implementation is based on the article "An Analysis and Implementation of
+    # the Harris Corner Detector" by Javier Sanchez, Nelson Monzon, and Agustín Salgado
     corners = []
     cornerness_rows_number = len(cornerness)
     cornerness_columns_number = len(cornerness[0])
@@ -201,7 +159,7 @@ def non_maximum_suppression(cornerness, threshold, window_radius):
                     skip[row][column1] = True
                     column1 += 1
                 if column1 > column + window_radius:
-                    column2 = column -1
+                    column2 = column - 1
                     while column2 >= (column - window_radius) and (cornerness[row][column2] <= cornerness[row][column]):
                         column2 -= 1
                     if column2 < column - window_radius:
@@ -227,107 +185,102 @@ def non_maximum_suppression(cornerness, threshold, window_radius):
                         if not found:
                             corners.append((row, column, cornerness[row][column]))
                 column = column1
-
     return corners
 
-def convert_grayscale_to_rgb(image_data):
+
+def convert_grayscale_to_rgb(image_data) -> np.ndarray:
     image_data = np.asarray(image_data)
     if len(image_data.shape) == 3:
-        return image_data
+        return image_data.astype(np.uint8)
     if len(image_data.shape) == 2:
         image_rows_number = image_data.shape[0]
         image_columns_number = image_data.shape[1]
         image_rgb_data = np.zeros((image_rows_number, image_columns_number, 3), 'uint8')
-        # image_rgb_data = [[[0.0 for z in range(3)] for y in range(image_columns_number)] for x in range(image_rows_number)]
         for row in range(image_rows_number):
             for column in range(image_columns_number):
                 image_rgb_data[row][column] = [image_data[row][column], image_data[row][column], image_data[row][column]]
-                # image_rgb_data[row][column][0] = image_data
-                # image_rgb_data[row][column][1] = image_data
-                # image_rgb_data[row][column][2] = image_data
-    return np.asarray(image_rgb_data).astype(np.uint8)
+        return np.asarray(image_rgb_data).astype(np.uint8)
 
 
-def mark_corners(image, corners):
+def mark_corners(image_data, corners, rgb_color: list = (0, 255, 0)) -> np.ndarray:
     mark_radius = 1
-    image_rgb_data = convert_grayscale_to_rgb(image)
+    image_rgb_data = convert_grayscale_to_rgb(image_data)
     image_rows_number = image_rgb_data.shape[0]
     image_columns_number = image_rgb_data.shape[1]
     for corner in corners:
         corner_row = corner[0]
         corner_column = corner[1]
-        # corner_row = corner[0] - GAUSSIAN_KERNEL_HEIGHT // 2 # TODO: Just guessing - uncomment if blur is used
-        # corner_column = corner[1] - GAUSSIAN_KERNEL_WIDTH // 2 # TODO: Just guessing - uncomment if blur is used
         for mark_row in range(-mark_radius, mark_radius):
             for mark_column in range(-mark_radius, mark_radius):
                 if 0 <= corner_row + mark_row < image_rows_number and 0 <= corner_column + mark_column < image_columns_number:
-                    image_rgb_data[corner_row + mark_row][corner_column + mark_column] = [0, 255, 0] #RED
-    # draw = ImageDraw.Draw(image)
-    # for corner in corners:
-        # bounding_box = (corner[0] - mark_radius, corner[1] - mark_radius, corner[0] + mark_radius, corner[1 + mark_radius])
-        # draw = draw.ellipse(bounding_box, fill=128)
+                    image_rgb_data[corner_row + mark_row][corner_column + mark_column] = rgb_color
     return image_rgb_data
 
 
-def harris_corner_detector(image, window_size, alpha, threshold, output_path):
-    cornerness = get_harris_cornerness(image, window_size, alpha)
-    corners = non_maximum_suppression(cornerness, threshold, window_size * 2) # or don't * 2
+def harris_corner_detector(image_data, window_size: int, alpha: float, threshold: float, output_path: str, show_corners: bool = False) -> list:
+    cornerness = get_harris_cornerness(image_data, window_size, alpha, enable_blur=True)
+    corners = non_maximum_suppression(cornerness, threshold, window_size * 2)
     outer_corners = get_outer_corners(corners)
-    image_rgb_data = mark_blob(image, outer_corners)
-    image_rgb_data = mark_corners(image_rgb_data, corners)
-    image = Image.fromarray(image_rgb_data)
+    image_rgb_data = mark_blob(image_data, outer_corners)
+    if show_corners:
+        image_rgb_data = mark_corners(image_rgb_data, corners)
+    image_data = Image.fromarray(image_rgb_data)
     try:
-        image.save(output_path)
+        image_data.save(output_path)
     except IOError:
         print('Cannot save image as a file ', output_path)
-        exit
     return outer_corners
 
-def get_outer_corners(corners):
-    x_min, y_min = corners[0][0], corners[0][1]
-    x_max, y_max = corners[0][0], corners[0][1]
 
-    for corner in corners:
-        if corner[0] < x_min:
-            x_min = corner[0]
-        if corner[1] < y_min:
-            y_min = corner[1]
-        if corner[0] > x_max:
-            x_max = corner[0]
-        if corner[1] > y_max:
-            y_max = corner[1]
-    return [x_min, y_min, x_max, y_max]
+def get_outer_corners(corners: list) -> list:
+    if len(corners) == 0:
+        raise ValueError('List of corners is empty due to: '
+                         '1) too large threshold in Harris detector or '
+                         '2) too large size of smoothening kernel. Please adjust those parameters.')
+    else:
+        x_min, y_min = corners[0][0], corners[0][1]
+        x_max, y_max = corners[0][0], corners[0][1]
+        for corner in corners:
+            if corner[0] < x_min:
+                x_min = corner[0]
+            if corner[1] < y_min:
+                y_min = corner[1]
+            if corner[0] > x_max:
+                x_max = corner[0]
+            if corner[1] > y_max:
+                y_max = corner[1]
+        return [x_min, y_min, x_max, y_max]
 
 
-def mark_blob(image, outer_corners):
-    image_rgb_data = convert_grayscale_to_rgb(image)
+def mark_blob(image_data, outer_corners: list, rgb_color: list = (255, 0, 0)) -> np.ndarray:
+    image_rgb_data = convert_grayscale_to_rgb(image_data)
     x_min = outer_corners[0]
     y_min = outer_corners[1]
     x_max = outer_corners[2]
     y_max = outer_corners[3]
     for x in range(x_min, x_max + 1):
-        image_rgb_data[x][y_min] = [255, 0, 0]
-        image_rgb_data[x][y_max] = [255, 0, 0]
+        image_rgb_data[x][y_min] = rgb_color
+        image_rgb_data[x][y_max] = rgb_color
     for y in range(y_min, y_max + 1):
-        image_rgb_data[x_min][y] = [255, 0, 0]
-        image_rgb_data[x_max][y] = [255, 0, 0]
+        image_rgb_data[x_min][y] = rgb_color
+        image_rgb_data[x_max][y] = rgb_color
     return image_rgb_data
 
 
-def detect_blobs(folder_path):
+def detect_blobs(folder_path: str) -> list:
     result = []
-    for filename in os.listdir(IMAGE_DIR):
+    for filename in os.listdir(folder_path):
         if filename != '.directory':
-            filepath = IMAGE_DIR + filename
+            filepath = INPUT_DIR + filename
             image = corr.read_grayscale_image_as_array(filepath)
-            output_filename = OUTPUT_DIR + 'corners_' + filename
-            coordinates = harris_corner_detector(image, WINDOW_SIZE, HARRIS_DETECTOR_ALPHA, HARRIS_DETECTOR_THRESHOLD, output_filename)
+            output_filename = folder_path + 'result_' + filename
+            coordinates = harris_corner_detector(image, WINDOW_SIZE, HARRIS_DETECTOR_ALPHA, HARRIS_DETECTOR_THRESHOLD, output_filename, show_corners=True)
             result.append({'file': filename, 'coords': coordinates})
     return result
 
 
 def main():
-    print(detect_blobs(IMAGE_DIR))
+    print(detect_blobs(INPUT_DIR))
     print('Done')
 
 
