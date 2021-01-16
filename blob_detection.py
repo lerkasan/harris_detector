@@ -11,16 +11,18 @@ OUTPUT_DIR = 'files/Blobs/'
 # Parameters for blurring with Gaussian filter
 # Default GAUSSIAN_KERNEL_HEIGHT and GAUSSIAN_KERNEL_WIDTH are 23
 # Default GAUSSIAN_SIGMA is 7
-GAUSSIAN_KERNEL_HEIGHT = 23
-GAUSSIAN_KERNEL_WIDTH = 23
-GAUSSIAN_SIGMA = 7
+GAUSSIAN_KERNEL_HEIGHT = 21
+GAUSSIAN_KERNEL_WIDTH = 21
+GAUSSIAN_SIGMA = 5
 
 # A window size for calculating covariance matrix. Default value is 3
 WINDOW_SIZE = 3
 
 # HARRIS_DETECTOR_ALPHA should be in a range of [0.04; 0.06]
 HARRIS_DETECTOR_ALPHA = 0.04
-HARRIS_DETECTOR_THRESHOLD = 2 * math.pow(255, 3)
+# HARRIS_DETECTOR_THRESHOLD should be >= 0. Default value 1 * math.pow(10, -11). Value 5 * math.pow(10, -13) is also good
+# HARRIS_DETECTOR_THRESHOLD = 1 * math.pow(10, -11)
+HARRIS_DETECTOR_THRESHOLD = 2.5 * math.pow(10, -13)
 
 
 class DerivativeOperator(list, Enum):
@@ -63,8 +65,8 @@ def save_gaussian_kernel_as_image(kernel_data, output_path: str):
     kernel_columns_number = kernel_data.shape[1]
     kernel_center_row_index = kernel_rows_number // 2
     kernel_center_column_index = kernel_columns_number // 2
-    grayscale_gaussian_kernel = (kernel_data / kernel_data[kernel_center_row_index][kernel_center_column_index]) * (corr.GRAYSCALE_COLORS_NUMBER - 1)
-    corr.save_array_as_grayscale_image(grayscale_gaussian_kernel, output_path)
+    grayscale_gaussian_kernel = kernel_data / kernel_data[kernel_center_row_index][kernel_center_column_index]  #* (corr.GRAYSCALE_COLORS_NUMBER - 1)
+    corr.save_pixels_as_grayscale_image(grayscale_gaussian_kernel, output_path)
 
 
 def blur_image(image_data, kernel_rows_number: int, kernel_columns_number: int, sigma: float, output_dir: str = None) -> np.ndarray:
@@ -74,17 +76,17 @@ def blur_image(image_data, kernel_rows_number: int, kernel_columns_number: int, 
     gaussian_kernel = get_gaussian_grayscale_kernel(kernel_rows_number, kernel_columns_number, sigma)
     blurred_image = corr.get_convolution(padded_image, gaussian_kernel)
     if not (output_dir is None):
-        corr.save_array_as_grayscale_image(blurred_image, output_dir + 'blur.png')
+        corr.save_pixels_as_grayscale_image(blurred_image, output_dir + 'blur.png')
         save_gaussian_kernel_as_image(gaussian_kernel, output_dir + 'kernel.png')
     return blurred_image
 
 
-def get_derivative(image_data, operator, output_path: str = None) -> np.ndarray:
+def get_derivative(image_data, operator, output_dir: str = None) -> np.ndarray:
     kernel_offset = len(operator) // 2
     padded_image = corr.image_padding(image_data, kernel_offset, kernel_offset)
     image_derivative = corr.get_convolution(padded_image, operator)
-    if not (output_path is None):
-        corr.save_array_as_grayscale_image(image_derivative, output_path + 'derivative.png')
+    if not (output_dir is None):
+        corr.save_pixels_as_grayscale_image(image_derivative, output_dir + 'derivative.png')
     return image_derivative
 
 
@@ -181,6 +183,10 @@ def non_maximum_suppression(cornerness: list, threshold: float, window_radius: i
     return corners
 
 
+def sort_corners(corners: list) -> list:
+    pass
+
+
 def convert_grayscale_to_rgb(image_data) -> np.ndarray:
     image_data = np.asarray(image_data)
     if len(image_data.shape) == 3:
@@ -211,13 +217,14 @@ def mark_corners(image_data, corners, rgb_color: list = (0, 255, 0)) -> np.ndarr
 
 
 def harris_corner_detector(image_data, window_size: int, alpha: float, threshold: float, output_path: str, show_corners: bool = False) -> list:
-    cornerness = get_harris_cornerness(image_data, window_size, alpha, enable_blur=True)
+    cornerness = get_harris_cornerness(image_data, window_size, alpha, dx_operator=DerivativeOperator.LAPLACIAN, enable_blur=True)
     corners = non_maximum_suppression(cornerness, threshold, window_size * 2)
     outer_corners = get_outer_corners(corners)
-    image_rgb_data = mark_blob(image_data, outer_corners)
+    image_rgb_data = corr.denormalize_grayscale_pixels(image_data)
+    marked_rgb_data = mark_blob(image_rgb_data, outer_corners)
     if show_corners:
-        image_rgb_data = mark_corners(image_rgb_data, corners)
-    image_data = Image.fromarray(image_rgb_data)
+        marked_rgb_data = mark_corners(marked_rgb_data, corners)
+        image_data = Image.fromarray(marked_rgb_data)
     try:
         image_data.save(output_path)
     except IOError:
