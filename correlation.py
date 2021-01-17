@@ -85,10 +85,9 @@ def get_correlation(image_data, kernel_data) -> np.ndarray:
         for image_column in prange(image_column_offset, image_columns_number - image_column_offset):
             for kernel_row in prange(-image_row_offset, image_row_offset + kernel_rows_number % 2):
                 for kernel_column in prange(-image_column_offset, image_column_offset + kernel_columns_number % 2):
-                    correlation[image_row - image_row_offset][image_column - image_column_offset] = \
-                        (correlation[image_row - image_row_offset][image_column - image_column_offset] +
-                         kernel_data[kernel_row + image_row_offset][kernel_column + image_column_offset] *
-                         image_data[image_row + kernel_row][image_column + kernel_column])
+                    correlation[image_row - image_row_offset][image_column - image_column_offset] += \
+                        kernel_data[kernel_row + image_row_offset][kernel_column + image_column_offset] * \
+                        image_data[image_row + kernel_row][image_column + kernel_column]
     return np.array(correlation)
 
 
