@@ -1,13 +1,13 @@
 import os
 import math
-import random
 import numpy as np
+import image as im
 import correlation as corr
 from PIL import Image
 from enum import Enum
 
-INPUT_DIR = 'files/1/'
-OUTPUT_DIR = 'files/1/'
+INPUT_DIR = 'files/Blobs/'
+OUTPUT_DIR = 'files/Blobs/'
 
 # Parameters for blurring with Gaussian filter
 # Default GAUSSIAN_KERNEL_HEIGHT and GAUSSIAN_KERNEL_WIDTH are 23
@@ -21,12 +21,13 @@ WINDOW_SIZE = 3
 
 # HARRIS_DETECTOR_ALPHA should be in a range of [0.04; 0.06]
 HARRIS_DETECTOR_ALPHA = 0.04
-# HARRIS_DETECTOR_THRESHOLD should be >= 0. Default value 1 * math.pow(10, -11). Value 2.5 * math.pow(10, -13) is also good
-HARRIS_DETECTOR_THRESHOLD = 1 * math.pow(10, -11)
+# HARRIS_DETECTOR_THRESHOLD should be >= 0. Default value 1 * math.pow(10, -13)
+HARRIS_DETECTOR_THRESHOLD = 1.8 * math.pow(10, -13)
 
-# Default DISTANCE_THRESHOLD = 78
-DISTANCE_THRESHOLD = 78
-MIN_NEIGHBORS = 4
+# Distance threshold for DBSCAN. Default DISTANCE_THRESHOLD value is 150
+DISTANCE_THRESHOLD = 150
+# Neighbors threshold for DBSCAN. Default MIN_NEIGHBORS is 3
+MIN_NEIGHBORS = 2
 
 
 class DerivativeOperator(list, Enum):
@@ -75,32 +76,32 @@ def save_gaussian_kernel_as_image(kernel_data, output_path: str):
     kernel_center_row_index = kernel_rows_number // 2
     kernel_center_column_index = kernel_columns_number // 2
     grayscale_gaussian_kernel = kernel_data / kernel_data[kernel_center_row_index][kernel_center_column_index]
-    corr.save_pixels_as_grayscale_image(grayscale_gaussian_kernel, output_path)
+    im.save_pixels_as_grayscale_image(grayscale_gaussian_kernel, output_path)
 
 
 def blur_image(image_data, kernel_rows_number: int, kernel_columns_number: int, sigma: float, output_dir: str = None) -> np.ndarray:
     kernel_row_offset = kernel_rows_number // 2
     kernel_column_offset = kernel_columns_number // 2
-    padded_image = corr.image_padding(image_data, kernel_row_offset, kernel_column_offset)
+    padded_image = im.image_padding(image_data, kernel_row_offset, kernel_column_offset)
     gaussian_kernel = get_gaussian_grayscale_kernel(kernel_rows_number, kernel_columns_number, sigma)
     blurred_image = corr.get_convolution(padded_image, gaussian_kernel)
     if not (output_dir is None):
-        corr.save_pixels_as_grayscale_image(blurred_image, output_dir + 'blur.png')
+        im.save_pixels_as_grayscale_image(blurred_image, output_dir + 'blur.png')
         save_gaussian_kernel_as_image(gaussian_kernel, output_dir + 'kernel.png')
     return blurred_image
 
 
 def get_derivative(image_data, operator, output_dir: str = None) -> np.ndarray:
     kernel_offset = len(operator) // 2
-    padded_image = corr.image_padding(image_data, kernel_offset, kernel_offset)
+    padded_image = im.image_padding(image_data, kernel_offset, kernel_offset)
     image_derivative = corr.get_convolution(padded_image, operator)
     if not (output_dir is None):
-        corr.save_pixels_as_grayscale_image(image_derivative, output_dir + 'derivative.png')
+        im.save_pixels_as_grayscale_image(image_derivative, output_dir + 'derivative.png')
     return image_derivative
 
 
-def get_harris_cornerness(image_data, window_size: int = WINDOW_SIZE, alpha: float = HARRIS_DETECTOR_ALPHA,
-                          dx_operator: DerivativeOperator = DerivativeOperator.LAPLACIAN, enable_blur: bool = True) -> list:
+def harris_corner_detector(image_data, window_size: int = WINDOW_SIZE, alpha: float = HARRIS_DETECTOR_ALPHA,
+                           dx_operator: DerivativeOperator = DerivativeOperator.LAPLACIAN, enable_blur: bool = True) -> list:
     image_rows_number = image_data.shape[0]
     image_columns_number = image_data.shape[1]
     window_size_offset = window_size // 2
@@ -135,7 +136,7 @@ def get_harris_cornerness(image_data, window_size: int = WINDOW_SIZE, alpha: flo
 
 
 def non_maximum_suppression(cornerness: list, threshold: float, window_radius: int) -> list:
-    # Non-maximum supression implementation is based on the article "An Analysis and Implementation of
+    # Non-maximum suppression implementation is based on the article "An Analysis and Implementation of
     # the Harris Corner Detector" by Javier Sanchez, Nelson Monzon, and Agustín Salgado
     corners = []
     cornerness_rows_number = len(cornerness)
@@ -187,29 +188,14 @@ def non_maximum_suppression(cornerness: list, threshold: float, window_radius: i
                                 column_for_comparison += 1
                             row_for_comparison += 1
                         if not found:
-                            # corners.append((row, column, cornerness[row][column]))
                             corners.append((row, column))
                 column = column1
     return corners
 
 
-def convert_grayscale_to_rgb(image_data) -> np.ndarray:
-    image_data = np.asarray(image_data)
-    if len(image_data.shape) == 3:
-        return image_data.astype(np.uint8)
-    if len(image_data.shape) == 2:
-        image_rows_number = image_data.shape[0]
-        image_columns_number = image_data.shape[1]
-        image_rgb_data = np.zeros((image_rows_number, image_columns_number, 3), 'uint8')
-        for row in range(image_rows_number):
-            for column in range(image_columns_number):
-                image_rgb_data[row][column] = [image_data[row][column], image_data[row][column], image_data[row][column]]
-        return np.asarray(image_rgb_data).astype(np.uint8)
-
-
 def mark_corners(image_data, corners, rgb_color: list = (0, 255, 0)) -> np.ndarray:
     mark_radius = 1
-    image_rgb_data = convert_grayscale_to_rgb(image_data)
+    image_rgb_data = im.convert_grayscale_to_rgb(image_data)
     image_rows_number = image_rgb_data.shape[0]
     image_columns_number = image_rgb_data.shape[1]
     for corner in corners:
@@ -222,53 +208,61 @@ def mark_corners(image_data, corners, rgb_color: list = (0, 255, 0)) -> np.ndarr
     return image_rgb_data
 
 
-def harris_corner_detector(image_data, window_size: int, alpha: float, threshold: float, output_path: str, show_corners: bool = False) -> list:
-    cornerness = get_harris_cornerness(image_data, window_size, alpha, dx_operator=DerivativeOperator.LAPLACIAN, enable_blur=True)
+def mark_clustered_corners(image_data, clusters: list) -> np.ndarray:
+    clusters_coords = []
+    marked_rgb_data = image_data
+    for cluster in clusters:
+        corner_coords = []
+        for corner in cluster:
+            cluster_corner_coord = corner[1]
+            corner_coords.append(cluster_corner_coord)
+        clusters_coords.append(corner_coords)
+    for cluster in clusters_coords:
+        marked_rgb_data = mark_corners(marked_rgb_data, cluster, [0, 255, 0])
+    return marked_rgb_data
+
+
+def mark_blob(image_data, outer_corners: list, rgb_color: list = (255, 0, 0)) -> np.ndarray:
+    image_rgb_data = im.convert_grayscale_to_rgb(image_data)
+    x_min = outer_corners[0]
+    y_min = outer_corners[1]
+    x_max = outer_corners[2]
+    y_max = outer_corners[3]
+    for x in range(x_min, x_max + 1):
+        image_rgb_data[x][y_min] = rgb_color
+        image_rgb_data[x][y_max] = rgb_color
+    for y in range(y_min, y_max + 1):
+        image_rgb_data[x_min][y] = rgb_color
+        image_rgb_data[x_max][y] = rgb_color
+    return image_rgb_data
+
+
+def mark_blobs_and_corners(image_data, window_size: int, alpha: float, threshold: float, output_path: str, show_corners: bool = False) -> list:
+    cornerness = harris_corner_detector(image_data, window_size, alpha, dx_operator=DerivativeOperator.LAPLACIAN, enable_blur=True)
     corners = non_maximum_suppression(cornerness, threshold, window_size * 2)
-    outer_corners = get_outer_corners(corners)
-    image_rgb_data = corr.denormalize_grayscale_pixels(image_data)
-    marked_rgb_data = mark_blob(image_rgb_data, outer_corners)
-
-    clusters = dbscan(corners, DISTANCE_THRESHOLD, MIN_NEIGHBORS)
-
+    clusters = cluster_corners_dbscan(corners, DISTANCE_THRESHOLD, MIN_NEIGHBORS)
+    image_rgb_data = im.denormalize_grayscale_pixels(image_data)
+    marked_rgb_data = image_rgb_data
     if show_corners:
-        # marked_rgb_data = mark_corners(marked_rgb_data, corners)
-        # image_data = Image.fromarray(marked_rgb_data)
-        color = 50
-        cluster_corner_coords = []
+        if not clusters:
+            marked_rgb_data = mark_corners(image_rgb_data, corners)
+        else:
+            marked_rgb_data = mark_clustered_corners(image_rgb_data, clusters)
+    outer_corners_list = []
+    for cluster in clusters:
+        outer_corners = get_outer_corners(cluster)
+        marked_rgb_data = mark_blob(marked_rgb_data, outer_corners)
+        outer_corners_list.append(outer_corners)
 
-        clusters_coords = []
-
-        stripped_outputpath = output_path.split('.png', 1)[0]
-
-        for cluster in clusters:
-            cluster_corner_coords = []
-            for cluster_corner in cluster:
-                cluster_corner_coord = cluster_corner[1]
-                cluster_corner_coords.append(cluster_corner_coord)
-            clusters_coords.append(cluster_corner_coords)
-
-        old_marked_rgb_data = marked_rgb_data
-        for cluster in clusters_coords:
-            color += 35
-            # marked_rgb_data = mark_corners(marked_rgb_data, cluster_corner_coords, [color, color, color])
-            marked_rgb_data = mark_corners(old_marked_rgb_data, cluster, [0, 255, 0])
-            image_data = Image.fromarray(marked_rgb_data)
-            image_data.save(stripped_outputpath + str(color) + '.png')
-
-    # if show_corners:
-    #     grouped_corners = find_corner_neighbors(corners, DISTANCE_THRESHOLD)
-    #     for group in grouped_corners:
-    #         color = random(255)
-    #         marked_rgb_data = mark_corners(marked_rgb_data, corners)
-    #     image_data = Image.fromarray(marked_rgb_data)
-
-    print(clusters)
-    # try:
-    #     image_data.save(output_path)
-    # except IOError:
-    #     print('Cannot save image as a file ', output_path)
-    return outer_corners
+    image_data = Image.fromarray(marked_rgb_data)
+    image_data.convert('RGB')
+    image_data.save(output_path)
+    try:
+        image_data.save(output_path)
+    except IOError:
+        print('Cannot save image as a file ', output_path)
+    # return outer_corners
+    return outer_corners_list
 
 
 def get_outer_corners(corners: list) -> list:
@@ -277,9 +271,12 @@ def get_outer_corners(corners: list) -> list:
                          '1) too large threshold in Harris detector  or '
                          '2) too large size of smoothening kernel. Please adjust those parameters.')
     else:
-        x_min, y_min = corners[0][0], corners[0][1]
-        x_max, y_max = corners[0][0], corners[0][1]
+        corners_coords = []
         for corner in corners:
+            corners_coords.append(corner[1])
+        x_min, y_min = corners_coords[0][0], corners_coords[0][1]
+        x_max, y_max = corners_coords[0][0], corners_coords[0][1]
+        for corner in corners_coords:
             if corner[0] < x_min:
                 x_min = corner[0]
             if corner[1] < y_min:
@@ -291,23 +288,6 @@ def get_outer_corners(corners: list) -> list:
         return [x_min, y_min, x_max, y_max]
 
 
-# def find_corner_neighbors(corners: list, threshold: float) -> list:
-#     corners_number = len(corners)
-#     grouped_corners = []
-#     distances = np.zeros((corners_number, corners_number), np.float)
-#     for corner1_index in range(corners_number):
-#         corner_neighbors = []
-#         for corner2_index in range(corner1_index + 1, corners_number):
-#             distance = get_distance(corners[corner1_index], corners[corner2_index])
-#             distances[corner1_index][corner2_index] = distance
-#             distances[corner2_index][corner1_index] = distance
-#             if distance < threshold:
-#                 corner_neighbors.append((corners[corner2_index][0], corners[corner2_index][1]))
-#         if corner_neighbors:
-#             corner_neighbors.append((corners[corner1_index][0], corners[corner1_index][1]))
-#             grouped_corners.append(corner_neighbors)
-#     return grouped_corners
-
 def get_corner_neighbors(corner, corners: list, threshold: float) -> set:
     corner_neighbors = set()
     for corner_elem in corners:
@@ -317,33 +297,7 @@ def get_corner_neighbors(corner, corners: list, threshold: float) -> set:
     return corner_neighbors
 
 
-# def dbscan(corners: list, threshold: float, min_neighbors: int) -> list:
-#     corners_number = len(corners)
-#     clusters = []
-#     statuses = ['' for n in range(corners_number)]
-#     for corner_index in range(corners_number):
-#         corner = corners[corner_index]
-#         if statuses[corner_index] != Status.VISITED:
-#             statuses[corner_index] = Status.VISITED
-#             neighbors = get_corner_neighbors(corner, corners, threshold)
-#             if len(neighbors) < min_neighbors:
-#                 statuses[corner_index] = Status.NOISE
-#             else:
-#                 cluster = set()
-#                 while neighbors:
-#                     neighbor = neighbors.pop()
-#                     if statuses[neighbor] != Status.VISITED:
-#                         statuses[neighbor] = Status.VISITED
-#                         extended_neighbors = get_corner_neighbors(neighbor)
-#                         if len(neighbors) >= min_neighbors:
-#                             neighbors.update(extended_neighbors)
-#                     # if ():
-#                         cluster.add(neighbor)
-#                 clusters.append(cluster)
-#     return clusters
-
-#
-def dbscan(corners: list, threshold: float, min_neighbors: int) -> list:
+def cluster_corners_dbscan(corners: list, threshold: float, min_neighbors: int) -> list:
     corners_number = len(corners)
     corners_with_index = []
     for corner_index in range(corners_number):
@@ -367,46 +321,24 @@ def dbscan(corners: list, threshold: float, min_neighbors: int) -> list:
                         extended_neighbors = get_corner_neighbors(neighbor, corners_with_index, threshold)
                         if len(neighbors) >= min_neighbors:
                             neighbors.update(extended_neighbors)
-                    # if ():
                         cluster.add(neighbor)
                 clusters.append(cluster)
     return clusters
 
 
-#
-# def expand_cluster(neighbors: list):
-#     for corner in neighbors:
-#         if sta
-
-
-def get_distance(corner1, corner2) -> float:
-    distance = math.sqrt((corner1[0] - corner2[0]) ** 2 + (corner1[1] - corner2[1]) ** 2)
+def get_distance(pixel1, pixel2) -> float:
+    distance = math.sqrt((pixel1[0] - pixel2[0]) ** 2 + (pixel1[1] - pixel2[1]) ** 2)
     return distance
-
-
-def mark_blob(image_data, outer_corners: list, rgb_color: list = (255, 0, 0)) -> np.ndarray:
-    image_rgb_data = convert_grayscale_to_rgb(image_data)
-    x_min = outer_corners[0]
-    y_min = outer_corners[1]
-    x_max = outer_corners[2]
-    y_max = outer_corners[3]
-    for x in range(x_min, x_max + 1):
-        image_rgb_data[x][y_min] = rgb_color
-        image_rgb_data[x][y_max] = rgb_color
-    for y in range(y_min, y_max + 1):
-        image_rgb_data[x_min][y] = rgb_color
-        image_rgb_data[x_max][y] = rgb_color
-    return image_rgb_data
 
 
 def detect_blobs(folder_path: str) -> list:
     result = []
     for filename in os.listdir(folder_path):
-        if filename != '.directory':
+        if not filename.startswith('.'):
             filepath = INPUT_DIR + filename
-            image = corr.read_grayscale_image_as_array(filepath)
+            image = im.read_grayscale_image_as_array(filepath)
             output_filename = folder_path + 'result_' + filename
-            coordinates = harris_corner_detector(image, WINDOW_SIZE, HARRIS_DETECTOR_ALPHA, HARRIS_DETECTOR_THRESHOLD, output_filename, show_corners=True)
+            coordinates = mark_blobs_and_corners(image, WINDOW_SIZE, HARRIS_DETECTOR_ALPHA, HARRIS_DETECTOR_THRESHOLD, output_filename, show_corners=True)
             result.append({'file': filename, 'coords': coordinates})
     return result
 

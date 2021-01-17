@@ -1,68 +1,11 @@
 import numpy as np
-from PIL import Image
+import image as im
 from numba import jit, prange
+
 
 IMAGE_PATH = 'files/file.png'
 KERNEL_PATH = 'files/gaussian_kernel.png'
 OUTPUT_PATH = 'files/correlation_result.png'
-MAX_GRAYSCALE_COLOR_VALUE = 255
-GRAYSCALE_COLORS_NUMBER = MAX_GRAYSCALE_COLOR_VALUE + 1
-
-
-def normalize_grayscale_pixels(pixels) -> np.ndarray:
-    data = np.asarray(pixels).astype(float)
-    rows_number = data.shape[0]
-    columns_number = data.shape[1]
-    for row in range(rows_number):
-        for column in range(columns_number):
-            data[row][column] = data[row][column] / MAX_GRAYSCALE_COLOR_VALUE
-    return data
-
-
-def denormalize_grayscale_pixels(pixels) -> np.ndarray:
-    data = np.asarray(pixels).astype(float)
-    rows_number = data.shape[0]
-    columns_number = data.shape[1]
-    for row in range(rows_number):
-        for column in range(columns_number):
-            data[row][column] = (data[row][column] * MAX_GRAYSCALE_COLOR_VALUE) % GRAYSCALE_COLORS_NUMBER
-    return data
-
-
-def read_grayscale_image_as_array(input_path: str) -> np.ndarray:
-    #Open the image in grayscale mode
-    try:
-        image = Image.open(input_path).convert('L')
-        pixels = np.asarray(image).astype('uint8')
-        normalized_pixels = normalize_grayscale_pixels(pixels)
-        return normalized_pixels
-    except IOError:
-        print('Input file is not accessible ', input_path)
-
-
-def save_pixels_as_grayscale_image(pixels, output_path: str):
-    denormalized_pixels = denormalize_grayscale_pixels(pixels)
-    array = np.asarray(denormalized_pixels).astype(np.uint8)
-    image = Image.fromarray(array)
-    try:
-        image.save(output_path)
-        print('File has been successfully saved: ', output_path)
-    except IOError:
-        print('Cannot save image as a file ', output_path)
-
-
-def image_padding(image_data, image_row_offset: int, image_column_offset: int) -> np.ndarray:
-    if image_row_offset < 0 or image_column_offset < 0:
-        raise ValueError('image_row_offset and image_column_offset parameters should be non-negative integers.')
-    image_data = np.asarray(image_data)
-    image_rows_number = image_data.shape[0]
-    image_columns_number = image_data.shape[1]
-    padded_image_shape = (image_rows_number + image_row_offset * 2, image_columns_number + image_column_offset * 2)
-    padded_image = [[1.0 for y in range(padded_image_shape[1])] for x in range(padded_image_shape[0])]
-    for row in range(image_rows_number):
-        for column in range(image_columns_number):
-            padded_image[row + image_row_offset][column + image_column_offset] = image_data[row][column]
-    return np.asarray(padded_image)
 
 
 @jit(nopython=True, parallel=True)
@@ -110,13 +53,13 @@ def get_convolution(image_data, kernel_data) -> np.ndarray:
 
 
 def correlation_to_file(image_path: str, kernel_path: str, output_path: str):
-    image = read_grayscale_image_as_array(image_path)
-    kernel = read_grayscale_image_as_array(kernel_path)
+    image = im.read_grayscale_image_as_array(image_path)
+    kernel = im.read_grayscale_image_as_array(kernel_path)
     image_row_offset = kernel.shape[0] // 2
     image_column_offset = kernel.shape[1] // 2
-    padded_image = image_padding(image, image_row_offset, image_column_offset)
+    padded_image = im.image_padding(image, image_row_offset, image_column_offset)
     correlation = get_correlation(padded_image, kernel)
-    save_pixels_as_grayscale_image(correlation, output_path)
+    im.save_pixels_as_grayscale_image(correlation, output_path)
 
 
 def main():
